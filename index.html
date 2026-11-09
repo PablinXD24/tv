@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartCast P2P - Espelhamento Celular para PC</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PeerJS (WebRTC Wrapper) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- HTML5 QR Code Scanner -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            cyan: '#00f3ff',
+                            magenta: '#ff007f',
+                            purple: '#8b5cf6',
+                            dark: '#090d16'
+                        }
+                    },
+                    boxShadow: {
+                        'neon-cyan': '0 0 20px rgba(0, 243, 255, 0.35)',
+                        'neon-magenta': '0 0 20px rgba(255, 0, 127, 0.35)',
+                        'glow': '0 0 30px rgba(139, 92, 246, 0.25)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(9, 13, 22, 0.8); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 9999px; }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .neon-border-cyan {
+            border: 1px solid rgba(0, 243, 255, 0.4);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+        }
+
+        .neon-border-magenta {
+            border: 1px solid rgba(255, 0, 127, 0.4);
+            box-shadow: 0 0 15px rgba(255, 0, 127, 0.2);
+        }
+
+        /* Equalizer Animation */
+        @keyframes wave {
+            0%, 100% { height: 15%; }
+            50% { height: 100%; }
+        }
+        .eq-bar-1 { animation: wave 1.2s infinite ease-in-out; }
+        .eq-bar-2 { animation: wave 0.8s infinite ease-in-out 0.2s; }
+        .eq-bar-3 { animation: wave 1.4s infinite ease-in-out 0.4s; }
+        .eq-bar-4 { animation: wave 0.9s infinite ease-in-out 0.1s; }
+    </style>
+</head>
+<body class="h-full font-sans antialiased bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden selection:bg-neon-cyan selection:text-slate-950">
+
+    <!-- TOP HEADER -->
+    <header class="h-16 border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-fuchsia-600 flex items-center justify-center shadow-neon-cyan">
+                <i data-lucide="cast" class="w-5 h-5 text-slate-950 stroke-[2.5]"></i>
+            </div>
+            <div>
+                <h1 class="font-extrabold text-lg leading-none tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-fuchsia-300 to-purple-400">
+                    SmartCast P2P
+                </h1>
+                <span class="text-[11px] text-slate-400 font-medium">Espelhamento WebRTC Sem Servidor</span>
+            </div>
+        </div>
+
+        <!-- Connection Status & Global Controls -->
+        <div class="flex items-center space-x-3">
+            <div id="statusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs text-slate-300">
+                <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                <span id="statusText">Aguardando Escolha</span>
+            </div>
+
+            <button id="btnSwitchMode" class="hidden px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition">
+                Trocar Modo
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN APP CONTAINER -->
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+
+        <!-- INITIAL MODE SELECTION SCREEN -->
+        <div id="modeSelectionScreen" class="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-8 z-20">
+            <div class="max-w-md space-y-3">
+                <h2 class="text-3xl font-extrabold tracking-tight text-white">Como deseja usar este dispositivo?</h2>
+                <p class="text-sm text-slate-400">Conecte o seu celular diretamente ao seu PC ou Smart TV via WebRTC Peer-to-Peer sem intermediários.</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-2xl w-full">
+                <!-- PC / RECEPTOR BUTTON -->
+                <button id="selectPcModeBtn" class="glass-panel p-6 rounded-3xl border border-slate-700 hover:neon-border-cyan transition-all text-left flex flex-col justify-between space-y-4 group">
+                    <div class="w-14 h-14 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <i data-lucide="tv" class="w-7 h-7"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <h3 class="text-lg font-bold text-slate-100 group-hover:text-cyan-400 transition-colors">Modo PC / Smart TV</h3>
+                        <p class="text-xs text-slate-400">Exibe a tela grande, gera o QR Code e recebe a transmissão de vídeo, áudio ou fotos.</p>
+                    </div>
+                    <span class="inline-flex items-center text-xs font-semibold text-cyan-400 pt-2">
+                        Receber Mídia <i data-lucide="arrow-right" class="w-4 h-4 ml-1"></i>
+                    </span>
+                </button>
+
+                <!-- CELULAR / TRANSMISSOR BUTTON -->
+                <button id="selectMobileModeBtn" class="glass-panel p-6 rounded-3xl border border-slate-700 hover:neon-border-magenta transition-all text-left flex flex-col justify-between space-y-4 group">
+                    <div class="w-14 h-14 rounded-2xl bg-fuchsia-500/10 text-fuchsia-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <i data-lucide="smartphone" class="w-7 h-7"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <h3 class="text-lg font-bold text-slate-100 group-hover:text-fuchsia-400 transition-colors">Modo Celular</h3>
+                        <p class="text-xs text-slate-400">Escaneia o QR Code, espelha a tela em tempo real ou envia arquivos de vídeo/foto.</p>
+                    </div>
+                    <span class="inline-flex items-center text-xs font-semibold text-fuchsia-400 pt-2">
+                        Transmitir do Celular <i data-lucide="arrow-right" class="w-4 h-4 ml-1"></i>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- MODO PC: RECEPTOR / SMART TV VIEW          -->
+        <!-- ========================================== -->
+        <div id="pcReceiverView" class="hidden flex-1 flex flex-col p-4 lg:p-6 overflow-y-auto">
+            <div id="tvDisplayFrame" class="relative w-full max-w-6xl mx-auto rounded-3xl overflow-hidden glass-card shadow-2xl flex flex-col border border-slate-800 bg-black aspect-video">
+                
+                <!-- STANDBY / WAITING FOR PAIRING OVERLAY -->
+                <div id="tvStandbyScreen" class="flex-1 flex flex-col lg:flex-row items-center justify-center p-8 gap-8 z-10 bg-slate-950/90">
+                    <!-- Left Side: QR Code -->
+                    <div class="flex flex-col items-center space-y-4 bg-slate-900/90 p-6 rounded-3xl border border-slate-800 shadow-xl">
+                        <div id="qrcodeContainer" class="p-3 bg-white rounded-2xl shadow-inner min-w-[180px] min-h-[180px] flex items-center justify-center"></div>
+                        <div class="text-center space-y-1">
+                            <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">ID do Receptor (PC)</span>
+                            <div class="flex items-center space-x-2">
+                                <span id="displayPeerId" class="font-mono text-xl font-bold text-cyan-400">Gerando ID...</span>
+                                <button id="btnCopyId" class="text-slate-400 hover:text-white transition p-1"><i data-lucide="copy" class="w-4 h-4"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Side: Instructions -->
+                    <div class="space-y-4 max-w-md text-center lg:text-left">
+                        <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-semibold">
+                            <i data-lucide="wifi" class="w-3.5 h-3.5"></i>
+                            <span>Conexão Direta WebRTC P2P</span>
+                        </div>
+                        <h2 class="text-2xl font-bold text-white">Conecte o seu Celular para Espelhar</h2>
+                        <ol class="text-xs text-slate-300 space-y-2.5 list-decimal list-inside text-left">
+                            <li>Abra esta página no navegador do seu Celular.</li>
+                            <li>Escolha o <strong>Modo Celular</strong>.</li>
+                            <li>Aponte a câmera do celular para o <strong>QR Code</strong> ao lado (ou digite o ID manualmente).</li>
+                            <li>Selecione <strong>Espelhar Tela</strong> ou envie arquivos de mídia!</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <!-- VIDEO PLAYER DISPLAY (Screen Share / Video Stream) -->
+                <video id="tvVideoPlayer" class="hidden w-full h-full object-contain z-10" autoplay playsinline></video>
+
+                <!-- IMAGE DISPLAY (Transmitted Photos) -->
+                <img id="tvImageDisplay" class="hidden w-full h-full object-contain z-10" alt="Mídia Recebida do Celular">
+
+                <!-- AUDIO VISUALIZER (Transmitted MP3s) -->
+                <div id="tvAudioVisualizer" class="hidden flex-col items-center justify-center space-y-6 z-10 w-full h-full bg-slate-950 px-8">
+                    <div class="w-32 h-32 rounded-3xl bg-slate-900 border border-slate-700 flex items-center justify-center text-cyan-400 shadow-neon-cyan relative overflow-hidden">
+                        <i data-lucide="music" class="w-16 h-16 z-10"></i>
+                    </div>
+                    <div class="text-center space-y-1">
+                        <h3 id="tvAudioTitle" class="text-xl font-bold text-slate-100">Transmitindo Áudio do Celular</h3>
+                        <p class="text-xs text-slate-400">Tocando em tempo real na TV / PC</p>
+                    </div>
+                    <div class="flex items-end space-x-2 h-12">
+                        <span class="w-2 bg-cyan-400 rounded-full eq-bar-1"></span>
+                        <span class="w-2 bg-fuchsia-500 rounded-full eq-bar-2"></span>
+                        <span class="w-2 bg-purple-500 rounded-full eq-bar-3"></span>
+                        <span class="w-2 bg-cyan-400 rounded-full eq-bar-4"></span>
+                    </div>
+                </div>
+
+                <!-- TV MEDIA OS OVERLAY BAR -->
+                <div id="tvOSBar" class="hidden absolute top-0 left-0 right-0 p-4 justify-between items-center z-20 bg-gradient-to-b from-black/90 to-transparent">
+                    <div class="flex items-center space-x-3">
+                        <span class="bg-cyan-500 text-slate-950 font-extrabold text-[10px] px-2 py-0.5 rounded tracking-wider uppercase">P2P LIVE</span>
+                        <span id="tvMediaSourceLabel" class="text-xs text-slate-200 font-medium truncate max-w-sm">Fluxo do Celular</span>
+                    </div>
+                    <button id="tvFullscreenBtn" class="text-slate-300 hover:text-white p-1 transition"><i data-lucide="maximize" class="w-5 h-5"></i></button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- MODO CELULAR: TRANSMISSOR & CONTROLE VIEW  -->
+        <!-- ========================================== -->
+        <div id="mobileTransmitterView" class="hidden flex-1 flex-col p-4 max-w-md mx-auto w-full space-y-4 overflow-y-auto">
+            
+            <!-- STEP 1: PAIRING PANEL (QR Scanner or ID Input) -->
+            <div id="mobilePairingPanel" class="glass-panel p-5 rounded-3xl space-y-4 border border-slate-800">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="qr-code" class="w-4 h-4 text-fuchsia-400"></i>
+                        <span>1. Conectar ao PC / Smart TV</span>
+                    </h3>
+                    <span id="mobileConnStatus" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 border border-slate-700">Desconectado</span>
+                </div>
+
+                <!-- QR Scanner Container -->
+                <div id="qrScannerWrapper" class="hidden relative rounded-2xl overflow-hidden border border-fuchsia-500/40 bg-black">
+                    <div id="qrReader" class="w-full"></div>
+                    <button id="btnCloseScanner" class="absolute top-2 right-2 bg-slate-900/80 text-white p-1.5 rounded-full z-20"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btnOpenScanner" class="py-2.5 px-3 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold flex items-center justify-center space-x-2 shadow-neon-magenta transition">
+                        <i data-lucide="camera" class="w-4 h-4"></i>
+                        <span>Escanear QR Code</span>
+                    </button>
+                    <button id="btnManualConnect" class="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition">
+                        Digitar ID
+                    </button>
+                </div>
+
+                <!-- Manual ID Input Modal/Drawer -->
+                <div id="manualIdContainer" class="hidden flex space-x-2 pt-2">
+                    <input type="text" id="targetPeerIdInput" placeholder="Ex: TV-1234" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500">
+                    <button id="btnConnectId" class="px-4 py-2 bg-cyan-500 text-slate-950 font-bold text-xs rounded-xl hover:bg-cyan-400 transition">Conectar</button>
+                </div>
+            </div>
+
+            <!-- STEP 2: TRANSMISSION SOURCES (Only active when paired) -->
+            <div id="mobileTransmitPanel" class="glass-panel p-5 rounded-3xl space-y-4 border border-slate-800 opacity-50 pointer-events-none transition-all">
+                <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                    <i data-lucide="radio" class="w-4 h-4 text-cyan-400"></i>
+                    <span>2. Escolher o que Transmitir</span>
+                </h3>
+
+                <div class="space-y-3">
+                    <!-- SCREEN SHARE BUTTON -->
+                    <button id="btnStartScreenShare" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs flex items-center justify-between shadow-neon-cyan transition">
+                        <div class="flex items-center space-x-3">
+                            <i data-lucide="monitor" class="w-5 h-5"></i>
+                            <div class="text-left">
+                                <p class="leading-none">Espelhar Tela do Celular</p>
+                                <p class="text-[10px] opacity-80 mt-1 font-normal">Transmissão WebRTC em tempo real</p>
+                            </div>
+                        </div>
+                        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+
+                    <!-- LOCAL MEDIA FILE CAST BUTTON -->
+                    <label for="mobileFileInput" class="w-full p-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-semibold text-xs flex items-center justify-between cursor-pointer transition">
+                        <div class="flex items-center space-x-3">
+                            <i data-lucide="folder-video" class="w-5 h-5 text-fuchsia-400"></i>
+                            <div class="text-left">
+                                <p class="leading-none">Transmitir Arquivo de Mídia</p>
+                                <p class="text-[10px] text-slate-400 mt-1 font-normal">Vídeos, fotos ou músicas da galeria</p>
+                            </div>
+                        </div>
+                        <i data-lucide="upload-cloud" class="w-4 h-4 text-slate-400"></i>
+                    </label>
+                    <input type="file" id="mobileFileInput" class="hidden" accept="video/*,audio/*,image/*">
+
+                    <!-- CAMERA FALLBACK SHARE BUTTON -->
+                    <button id="btnStartCameraShare" class="w-full p-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-semibold text-xs flex items-center justify-between transition">
+                        <div class="flex items-center space-x-3">
+                            <i data-lucide="camera" class="w-5 h-5 text-amber-400"></i>
+                            <div class="text-left">
+                                <p class="leading-none">Transmitir Câmera do Celular</p>
+                                <p class="text-[10px] text-slate-400 mt-1 font-normal">Para navegadores com tela restrita</p>
+                            </div>
+                        </div>
+                        <i data-lucide="video" class="w-4 h-4 text-slate-400"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- STEP 3: VIRTUAL REMOTE CONTROL FOR THE TRANSMITTED MEDIA -->
+            <div id="mobileRemotePanel" class="glass-panel p-5 rounded-3xl space-y-4 border border-slate-800 opacity-50 pointer-events-none transition-all">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="sliders" class="w-4 h-4 text-purple-400"></i>
+                        <span>3. Controle Remoto da TV</span>
+                    </h3>
+                    <button id="btnStopStream" class="text-rose-400 hover:text-rose-300 text-xs font-semibold flex items-center gap-1">
+                        <i data-lucide="square" class="w-3.5 h-3.5"></i> Parar
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2">
+                    <button id="remotePlayPause" class="py-3 bg-slate-800 hover:bg-slate-700 rounded-xl flex items-center justify-center text-cyan-400 active:scale-95 transition">
+                        <i data-lucide="play" class="w-5 h-5"></i>
+                    </button>
+                    <button id="remoteVolDown" class="py-3 bg-slate-800 hover:bg-slate-700 rounded-xl flex items-center justify-center text-slate-200 active:scale-95 transition">
+                        <i data-lucide="volume-1" class="w-5 h-5"></i>
+                    </button>
+                    <button id="remoteVolUp" class="py-3 bg-slate-800 hover:bg-slate-700 rounded-xl flex items-center justify-center text-slate-200 active:scale-95 transition">
+                        <i data-lucide="volume-2" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <script>
+        // GLOBAL APP STATE
+        const state = {
+            mode: null, // 'pc' or 'mobile'
+            peer: null,
+            peerId: null,
+            connection: null, // PeerJS DataConnection
+            mediaCall: null,  // PeerJS MediaConnection
+            localStream: null,
+            html5QrCode: null
+        };
+
+        // DOM ELEMENTS
+        const modeSelectionScreen = document.getElementById('modeSelectionScreen');
+        const pcReceiverView = document.getElementById('pcReceiverView');
+        const mobileTransmitterView = document.getElementById('mobileTransmitterView');
+        const btnSwitchMode = document.getElementById('btnSwitchMode');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        // PC Mode DOM
+        const qrcodeContainer = document.getElementById('qrcodeContainer');
+        const displayPeerId = document.getElementById('displayPeerId');
+        const btnCopyId = document.getElementById('btnCopyId');
+        const tvStandbyScreen = document.getElementById('tvStandbyScreen');
+        const tvVideoPlayer = document.getElementById('tvVideoPlayer');
+        const tvImageDisplay = document.getElementById('tvImageDisplay');
+        const tvAudioVisualizer = document.getElementById('tvAudioVisualizer');
+        const tvAudioTitle = document.getElementById('tvAudioTitle');
+        const tvOSBar = document.getElementById('tvOSBar');
+        const tvMediaSourceLabel = document.getElementById('tvMediaSourceLabel');
+        const tvFullscreenBtn = document.getElementById('tvFullscreenBtn');
+
+        // Mobile Mode DOM
+        const mobileConnStatus = document.getElementById('mobileConnStatus');
+        const qrScannerWrapper = document.getElementById('qrScannerWrapper');
+        const btnOpenScanner = document.getElementById('btnOpenScanner');
+        const btnCloseScanner = document.getElementById('btnCloseScanner');
+        const btnManualConnect = document.getElementById('btnManualConnect');
+        const manualIdContainer = document.getElementById('manualIdContainer');
+        const targetPeerIdInput = document.getElementById('targetPeerIdInput');
+        const btnConnectId = document.getElementById('btnConnectId');
+        const mobileTransmitPanel = document.getElementById('mobileTransmitPanel');
+        const mobileRemotePanel = document.getElementById('mobileRemotePanel');
+        const btnStartScreenShare = document.getElementById('btnStartScreenShare');
+        const btnStartCameraShare = document.getElementById('btnStartCameraShare');
+        const mobileFileInput = document.getElementById('mobileFileInput');
+        const btnStopStream = document.getElementById('btnStopStream');
+        const remotePlayPause = document.getElementById('remotePlayPause');
+        const remoteVolUp = document.getElementById('remoteVolUp');
+        const remoteVolDown = document.getElementById('remoteVolDown');
+
+        // INIT APP
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('selectPcModeBtn').addEventListener('click', () => initMode('pc'));
+            document.getElementById('selectMobileModeBtn').addEventListener('click', () => initMode('mobile'));
+            btnSwitchMode.addEventListener('click', () => location.reload());
+
+            btnCopyId.addEventListener('click', () => {
+                if (state.peerId) {
+                    navigator.clipboard.writeText(state.peerId);
+                    showToast('ID copiado para a área de transferência!', 'success');
+                }
+            });
+
+            // Mobile pairing triggers
+            btnManualConnect.addEventListener('click', () => manualIdContainer.classList.toggle('hidden'));
+            btnConnectId.addEventListener('click', () => {
+                const targetId = targetPeerIdInput.value.trim();
+                if (targetId) connectToPcPeer(targetId);
+            });
+
+            btnOpenScanner.addEventListener('click', startQrScanner);
+            btnCloseScanner.addEventListener('click', stopQrScanner);
+
+            // Transmit Triggers
+            btnStartScreenShare.addEventListener('click', startScreenShare);
+            btnStartCameraShare.addEventListener('click', startCameraShare);
+            mobileFileInput.addEventListener('change', handleMobileFileSelect);
+
+            // Remote Controls
+            btnStopStream.addEventListener('click', stopTransmission);
+            remotePlayPause.addEventListener('click', () => sendRemoteCommand({ type: 'play-pause' }));
+            remoteVolUp.addEventListener('click', () => sendRemoteCommand({ type: 'vol-up' }));
+            remoteVolDown.addEventListener('click', () => sendRemoteCommand({ type: 'vol-down' }));
+
+            // Fullscreen
+            tvFullscreenBtn.addEventListener('click', () => {
+                const frame = document.getElementById('tvDisplayFrame');
+                if (!document.fullscreenElement) {
+                    frame.requestFullscreen().catch(() => showToast('Erro ao alternar para Tela Cheia', 'error'));
+                } else {
+                    document.exitFullscreen();
+                }
+            });
+        }
+
+        // INITIALIZE OPERATING MODE
+        function initMode(mode) {
+            state.mode = mode;
+            modeSelectionScreen.classList.add('hidden');
+            btnSwitchMode.classList.remove('hidden');
+
+            // Generate unique Peer ID
+            const randomId = 'TV-' + Math.floor(1000 + Math.random() * 9000);
+            state.peer = new Peer(mode === 'pc' ? randomId : undefined, { debug: 1 });
+
+            state.peer.on('open', (id) => {
+                state.peerId = id;
+                if (mode === 'pc') {
+                    setupPcMode(id);
+                } else {
+                    setupMobileMode();
+                }
+            });
+
+            state.peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                showToast(`Erro WebRTC: ${err.type}`, 'error');
+            });
+        }
+
+        // ==========================================
+        // PC RECEIVER LOGIC
+        // ==========================================
+        function setupPcMode(peerId) {
+            pcReceiverView.classList.remove('hidden');
+            displayPeerId.textContent = peerId;
+
+            // Render QR Code containing Peer ID
+            qrcodeContainer.innerHTML = '';
+            new QRCode(qrcodeContainer, {
+                text: peerId,
+                width: 160,
+                height: 160,
+                colorDark: "#090d16",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+
+            updateStatus('waiting', 'Aguardando Conexão do Celular');
+
+            // Listen for incoming Data Connections (Control / File Transfer)
+            state.peer.on('connection', (conn) => {
+                state.connection = conn;
+                setupDataChannelListeners(conn);
+                updateStatus('connected', 'Celular Conectado!');
+                showToast('Celular emparelhado com sucesso!', 'success');
+            });
+
+            // Listen for incoming Media Streams (Screen Share / Camera Stream)
+            state.peer.on('call', (call) => {
+                call.answer(); // Answer incoming stream call
+                state.mediaCall = call;
+
+                call.on('stream', (remoteStream) => {
+                    displayVideoStream(remoteStream);
+                });
+            });
+        }
+
+        function setupDataChannelListeners(conn) {
+            conn.on('data', (data) => {
+                if (data.type === 'file-transfer') {
+                    displayFileMedia(data);
+                } else if (data.type === 'command') {
+                    handleRemoteCommand(data.command);
+                } else if (data.type === 'stop') {
+                    resetTvDisplay();
+                }
+            });
+
+            conn.on('close', () => {
+                updateStatus('waiting', 'Celular Desconectado');
+                resetTvDisplay();
+                showToast('Conexão com o celular encerrada.', 'info');
+            });
+        }
+
+        function displayVideoStream(stream) {
+            resetTvDisplay();
+            tvStandbyScreen.classList.add('hidden');
+            tvVideoPlayer.classList.remove('hidden');
+            tvOSBar.classList.remove('hidden');
+            tvOSBar.classList.add('flex');
+            tvMediaSourceLabel.textContent = 'Espelhamento de Tela em Tempo Real';
+
+            tvVideoPlayer.srcObject = stream;
+            tvVideoPlayer.play();
+            updateStatus('transmitting', 'Espelhando Tela...');
+        }
+
+        function displayFileMedia(fileData) {
+            resetTvDisplay();
+            tvStandbyScreen.classList.add('hidden');
+            tvOSBar.classList.remove('hidden');
+            tvOSBar.classList.add('flex');
+            tvMediaSourceLabel.textContent = fileData.fileName;
+
+            if (fileData.mimeType.startsWith('video/')) {
+                tvVideoPlayer.classList.remove('hidden');
+                tvVideoPlayer.src = fileData.fileUrl;
+                tvVideoPlayer.play();
+            } else if (fileData.mimeType.startsWith('image/')) {
+                tvImageDisplay.classList.remove('hidden');
+                tvImageDisplay.src = fileData.fileUrl;
+            } else if (fileData.mimeType.startsWith('audio/')) {
+                tvAudioVisualizer.classList.remove('hidden');
+                tvAudioVisualizer.classList.add('flex');
+                tvAudioTitle.textContent = fileData.fileName;
+                tvVideoPlayer.src = fileData.fileUrl;
+                tvVideoPlayer.play();
+            }
+
+            updateStatus('transmitting', `Exibindo: ${fileData.fileName}`);
+        }
+
+        function handleRemoteCommand(cmd) {
+            if (cmd.type === 'play-pause') {
+                if (!tvVideoPlayer.paused) tvVideoPlayer.pause();
+                else tvVideoPlayer.play();
+            } else if (cmd.type === 'vol-up') {
+                tvVideoPlayer.volume = Math.min(1, tvVideoPlayer.volume + 0.1);
+            } else if (cmd.type === 'vol-down') {
+                tvVideoPlayer.volume = Math.max(0, tvVideoPlayer.volume - 0.1);
+            }
+        }
+
+        function resetTvDisplay() {
+            tvVideoPlayer.pause();
+            tvVideoPlayer.removeAttribute('src');
+            tvVideoPlayer.srcObject = null;
+            tvVideoPlayer.classList.add('hidden');
+            tvImageDisplay.classList.add('hidden');
+            tvAudioVisualizer.classList.add('hidden');
+            tvAudioVisualizer.classList.remove('flex');
+            tvOSBar.classList.add('hidden');
+            tvOSBar.classList.remove('flex');
+            tvStandbyScreen.classList.remove('hidden');
+        }
+
+        // ==========================================
+        // MOBILE TRANSMITTER LOGIC
+        // ==========================================
+        function setupMobileMode() {
+            mobileTransmitterView.classList.remove('hidden');
+            mobileTransmitterView.classList.add('flex');
+            updateStatus('waiting', 'Pronto para emparelhar');
+        }
+
+        function startQrScanner() {
+            qrScannerWrapper.classList.remove('hidden');
+            state.html5QrCode = new Html5Qrcode("qrReader");
+
+            state.html5QrCode.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 220, height: 220 } },
+                (decodedText) => {
+                    stopQrScanner();
+                    connectToPcPeer(decodedText);
+                },
+                () => {} // silent error ignore
+            ).catch(err => {
+                showToast('Erro ao abrir câmera para QR Code.', 'error');
+                qrScannerWrapper.classList.add('hidden');
+            });
+        }
+
+        function stopQrScanner() {
+            if (state.html5QrCode) {
+                state.html5QrCode.stop().then(() => {
+                    qrScannerWrapper.classList.add('hidden');
+                }).catch(() => qrScannerWrapper.classList.add('hidden'));
+            }
+        }
+
+        function connectToPcPeer(targetPeerId) {
+            updateStatus('connecting', 'Conectando ao PC...');
+            showToast(`Conectando a ${targetPeerId}...`, 'info');
+
+            // Open Data Channel
+            state.connection = state.peer.connect(targetPeerId);
+
+            state.connection.on('open', () => {
+                updateStatus('connected', 'Conectado!');
+                mobileConnStatus.textContent = 'Conectado';
+                mobileConnStatus.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+                
+                // Unlock Controls
+                mobileTransmitPanel.classList.remove('opacity-50', 'pointer-events-none');
+                mobileRemotePanel.classList.remove('opacity-50', 'pointer-events-none');
+                showToast('Conexão P2P Estabelecida!', 'success');
+            });
+
+            state.connection.on('close', () => {
+                updateStatus('waiting', 'Desconectado');
+                mobileConnStatus.textContent = 'Desconectado';
+                mobileConnStatus.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 border border-slate-700';
+                mobileTransmitPanel.classList.add('opacity-50', 'pointer-events-none');
+                mobileRemotePanel.classList.add('opacity-50', 'pointer-events-none');
+            });
+        }
+
+        // SCREEN SHARE API TRANSMISSION
+        async function startScreenShare() {
+            if (!state.connection) return;
+
+            try {
+                // Check getDisplayMedia support
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                    showToast('Espelhamento de tela inteira restrito neste navegador do celular. Use a opção Câmera ou Arquivo.', 'error');
+                    return;
+                }
+
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: true
+                });
+
+                state.localStream = stream;
+                state.mediaCall = state.peer.call(state.connection.peer, stream);
+
+                // Detect when screen share ends
+                stream.getVideoTracks()[0].onended = () => {
+                    stopTransmission();
+                };
+
+                showToast('Transmitindo tela do celular...', 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('Permissão de espelhamento negada ou indisponível.', 'error');
+            }
+        }
+
+        // CAMERA FALLBACK TRANSMISSION
+        async function startCameraShare() {
+            if (!state.connection) return;
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" },
+                    audio: true
+                });
+
+                state.localStream = stream;
+                state.mediaCall = state.peer.call(state.connection.peer, stream);
+
+                showToast('Transmitindo fluxo de câmera...', 'success');
+            } catch (err) {
+                showToast('Acesso à câmera/microfone negado.', 'error');
+            }
+        }
+
+        // FILE STREAM TRANSMISSION (DataChannel)
+        function handleMobileFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file || !state.connection) return;
+
+            showToast(`Lendo arquivo: ${file.name}...`, 'info');
+            const reader = new FileReader();
+
+            reader.onload = (evt) => {
+                const fileBlobUrl = URL.createObjectURL(file);
+                
+                // Send payload over P2P DataChannel
+                state.connection.send({
+                    type: 'file-transfer',
+                    fileName: file.name,
+                    mimeType: file.type,
+                    fileUrl: fileBlobUrl // For local/same-origin emulator testing
+                });
+
+                showToast(`Mídia enviada para a TV!`, 'success');
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function sendRemoteCommand(command) {
+            if (state.connection) {
+                state.connection.send({ type: 'command', command });
+            }
+        }
+
+        function stopTransmission() {
+            if (state.localStream) {
+                state.localStream.getTracks().forEach(track => track.stop());
+                state.localStream = null;
+            }
+            if (state.connection) {
+                state.connection.send({ type: 'stop' });
+            }
+            showToast('Transmissão parada.', 'info');
+        }
+
+        // STATUS BADGE UTILITY
+        function updateStatus(type, text) {
+            statusText.textContent = text;
+            if (type === 'waiting') {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse";
+            } else if (type === 'connecting') {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping";
+            } else if (type === 'connected') {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-neon-cyan";
+            } else if (type === 'transmitting') {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-fuchsia-500 shadow-neon-magenta animate-bounce";
+            }
+        }
+
+        // TOAST NOTIFICATIONS UTILITY
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const borderCol = type === 'success' ? 'border-emerald-500/40 text-emerald-200' : type === 'error' ? 'border-rose-500/40 text-rose-200' : 'border-cyan-500/40 text-cyan-200';
+
+            toast.className = `glass-panel ${borderCol} text-xs px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-2 transition-all transform translate-y-2 opacity-0 pointer-events-auto border`;
+            toast.innerHTML = `
+                <i data-lucide="${type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info'}" class="w-4 h-4"></i>
+                <span>${message}</span>
+            `;
+
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+    </script>
+</body>
+</html>
